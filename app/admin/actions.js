@@ -1,6 +1,8 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
+import { createClient } from "@supabase/supabase-js";
 import { createSessionClient } from "@/lib/supabase/session";
 
 export async function login(prevState, formData) {
@@ -97,4 +99,98 @@ export async function gantiPassword(prevState, formData) {
   } catch (err) {
     return { error: err.message || "Terjadi kesalahan pada server saat mengganti password." };
   }
+}
+
+// US-08: tambah produk
+function bacaTeks(data, nama) {
+  const nilai = data.get(nama);
+  return nilai ? String(nilai).trim() : "";
+}
+
+export async function tambahProduk(prevState, formData) {
+  const data = formData instanceof FormData ? formData : prevState instanceof FormData ? prevState : null;
+
+  if (!data) {
+    return { error: "Data form tidak valid." };
+  }
+
+  const values = {
+    nama: bacaTeks(data, "nama"),
+    harga: bacaTeks(data, "harga"),
+    kategori: bacaTeks(data, "kategori"),
+    foto_url: bacaTeks(data, "foto_url"),
+    deskripsi: bacaTeks(data, "deskripsi"),
+  };
+
+  const errors = {};
+
+  if (!values.nama) {
+    errors.nama = "Nama produk wajib diisi.";
+  } else if (values.nama.length > 120) {
+    errors.nama = "Nama produk maksimal 120 karakter.";
+  }
+
+  const harga = Number(values.harga);
+  if (!values.harga) {
+    errors.harga = "Harga wajib diisi.";
+  } else if (!/^\d+$/.test(values.harga) || harga <= 0) {
+    errors.harga = "Harga harus berupa angka bulat lebih dari 0.";
+  } else if (harga > 2147483647) {
+    errors.harga = "Harga terlalu besar.";
+  }
+
+  if (!values.kategori) {
+    errors.kategori = "Kategori wajib diisi.";
+  }
+
+  if (values.foto_url && !/^(\/|https?:\/\/)/i.test(values.foto_url)) {
+    errors.foto_url = "Link foto harus diawali / atau https://";
+  }
+
+  if (Object.keys(errors).length > 0) {
+    return { errors, values };
+  }
+
+  let pesanError = null;
+
+  try {
+    // Pastikan yang menambah produk adalah admin yang sedang login
+    const sesi = await createSessionClient();
+    const {
+      data: { user },
+      error: userError,
+    } = await sesi.auth.getUser();
+
+    if (userError || !user) {
+      pesanError = "Sesi login tidak valid atau sudah kedaluwarsa. Silakan masuk kembali.";
+    } else {
+      const admin = createClient(
+        process.env.SUPABASE_URL,
+        process.env.SUPABASE_SECRET_KEY,
+        { auth: { persistSession: false } }
+      );
+
+      const { error } = await admin.from("produk").insert({
+        nama: values.nama,
+        harga,
+        kategori: values.kategori,
+        foto_url: values.foto_url || null,
+        deskripsi: values.deskripsi || null,
+      });
+
+      if (error) {
+        pesanError = `Gagal menyimpan produk: ${error.message}`;
+      }
+    }
+  } catch (err) {
+    pesanError = err.message || "Terjadi kesalahan pada server saat menyimpan produk.";
+  }
+
+  if (pesanError) {
+    return { error: pesanError, values };
+  }
+
+  revalidatePath("/admin");
+  revalidatePath("/");
+  redirect("/admin");
 }
