@@ -1,12 +1,28 @@
 import KartuProduk from "@/components/KartuProduk";
-import CatatanBelumAktif from "@/components/CatatanBelumAktif";
-import { produkContoh } from "@/lib/data-contoh";
 import { toko } from "@/lib/toko";
+import { createServerClient } from "@/lib/supabase/server";
 
-// US-01: halaman ini masih memakai data contoh.
-// Tugas peserta: ambil daftar produk dari tabel "produk" di Supabase, di sisi server.
-export default function HalamanKatalog() {
-  const daftarProduk = produkContoh;
+export const dynamic = "force-dynamic";
+
+export default async function HalamanKatalog() {
+  let daftarProduk = null;
+  let pesanError = null;
+
+  try {
+    const supabase = createServerClient();
+    const { data, error } = await supabase
+      .from("produk")
+      .select("*")
+      .order("id", { ascending: true });
+
+    if (error) {
+      pesanError = `Gagal memuat produk: ${error.message}`;
+    } else {
+      daftarProduk = data;
+    }
+  } catch (err) {
+    pesanError = `Gagal memuat produk: ${err.message || "Terjadi kesalahan pada server."}`;
+  }
 
   return (
     <>
@@ -22,14 +38,20 @@ export default function HalamanKatalog() {
         <h2 id="judul-produk" className="text-xl font-bold">
           Produk kami
         </h2>
-        <CatatanBelumAktif>
-          Masih data contoh. Sambungkan ke database: lihat US-01 di docs/user-stories.md.
-        </CatatanBelumAktif>
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-          {daftarProduk.map((produk) => (
-            <KartuProduk key={produk.id} produk={produk} />
-          ))}
-        </div>
+
+        {pesanError ? (
+          <p className="rounded-lg border border-garis bg-permukaan px-4 py-3 text-sm text-bahaya">
+            {pesanError}
+          </p>
+        ) : daftarProduk && daftarProduk.length > 0 ? (
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
+            {daftarProduk.map((produk) => (
+              <KartuProduk key={produk.id} produk={produk} />
+            ))}
+          </div>
+        ) : (
+          <p className="text-teks-lembut">Belum ada produk</p>
+        )}
       </section>
     </>
   );
