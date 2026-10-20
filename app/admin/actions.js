@@ -101,7 +101,7 @@ export async function gantiPassword(prevState, formData) {
   }
 }
 
-// ---------- Produk (US-08 tambah, US-09 ubah) ----------
+// ---------- Produk (US-08 tambah, US-09 ubah, US-10 hapus) ----------
 
 function bacaTeks(data, nama) {
   const nilai = data.get(nama);
@@ -259,4 +259,41 @@ export async function ubahProduk(id, prevState, formData) {
   revalidatePath("/admin");
   revalidatePath("/");
   redirect("/admin");
+}
+
+// US-10: id dikirim lewat input tersembunyi bernama "id"
+export async function hapusProduk(prevState, formData) {
+  const data = formData instanceof FormData ? formData : prevState instanceof FormData ? prevState : null;
+  const id = data ? bacaTeks(data, "id") : "";
+
+  if (!/^\d+$/.test(id)) {
+    return { error: "ID produk tidak valid." };
+  }
+
+  try {
+    if (!(await pastikanAdminLogin())) {
+      return { error: PESAN_SESI };
+    }
+
+    const { data: baris, error } = await klienAdmin()
+      .from("produk")
+      .delete()
+      .eq("id", Number(id))
+      .select("id");
+
+    if (error) {
+      return { error: `Gagal menghapus produk: ${error.message}` };
+    }
+
+    if (!baris || baris.length === 0) {
+      revalidatePath("/admin");
+      return { error: "Produk tidak ditemukan. Mungkin sudah dihapus." };
+    }
+  } catch (err) {
+    return { error: err.message || "Terjadi kesalahan pada server saat menghapus produk." };
+  }
+
+  revalidatePath("/admin");
+  revalidatePath("/");
+  return { success: true };
 }
