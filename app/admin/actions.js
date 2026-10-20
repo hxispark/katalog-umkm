@@ -101,19 +101,14 @@ export async function gantiPassword(prevState, formData) {
   }
 }
 
-// US-08: tambah produk
+// ---------- Produk (US-08 tambah, US-09 ubah) ----------
+
 function bacaTeks(data, nama) {
   const nilai = data.get(nama);
   return nilai ? String(nilai).trim() : "";
 }
 
-export async function tambahProduk(prevState, formData) {
-  const data = formData instanceof FormData ? formData : prevState instanceof FormData ? prevState : null;
-
-  if (!data) {
-    return { error: "Data form tidak valid." };
-  }
-
+function validasiProduk(data) {
   const values = {
     nama: bacaTeks(data, "nama"),
     harga: bacaTeks(data, "harga"),
@@ -147,6 +142,47 @@ export async function tambahProduk(prevState, formData) {
     errors.foto_url = "Link foto harus diawali / atau https://";
   }
 
+  return { values, errors, harga };
+}
+
+function barisProduk(values, harga) {
+  return {
+    nama: values.nama,
+    harga,
+    kategori: values.kategori,
+    foto_url: values.foto_url || null,
+    deskripsi: values.deskripsi || null,
+  };
+}
+
+async function pastikanAdminLogin() {
+  const sesi = await createSessionClient();
+  const {
+    data: { user },
+    error,
+  } = await sesi.auth.getUser();
+
+  return !error && !!user;
+}
+
+function klienAdmin() {
+  return createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY, {
+    auth: { persistSession: false },
+  });
+}
+
+const PESAN_SESI = "Sesi login tidak valid atau sudah kedaluwarsa. Silakan masuk kembali.";
+
+// US-08
+export async function tambahProduk(prevState, formData) {
+  const data = formData instanceof FormData ? formData : prevState instanceof FormData ? prevState : null;
+
+  if (!data) {
+    return { error: "Data form tidak valid." };
+  }
+
+  const { values, errors, harga } = validasiProduk(data);
+
   if (Object.keys(errors).length > 0) {
     return { errors, values };
   }
@@ -154,29 +190,10 @@ export async function tambahProduk(prevState, formData) {
   let pesanError = null;
 
   try {
-    // Pastikan yang menambah produk adalah admin yang sedang login
-    const sesi = await createSessionClient();
-    const {
-      data: { user },
-      error: userError,
-    } = await sesi.auth.getUser();
-
-    if (userError || !user) {
-      pesanError = "Sesi login tidak valid atau sudah kedaluwarsa. Silakan masuk kembali.";
+    if (!(await pastikanAdminLogin())) {
+      pesanError = PESAN_SESI;
     } else {
-      const admin = createClient(
-        process.env.SUPABASE_URL,
-        process.env.SUPABASE_SECRET_KEY,
-        { auth: { persistSession: false } }
-      );
-
-      const { error } = await admin.from("produk").insert({
-        nama: values.nama,
-        harga,
-        kategori: values.kategori,
-        foto_url: values.foto_url || null,
-        deskripsi: values.deskripsi || null,
-      });
+      const { error } = await klienAdmin().from("produk").insert(barisProduk(values, harga));
 
       if (error) {
         pesanError = `Gagal menyimpan produk: ${error.message}`;
@@ -184,6 +201,55 @@ export async function tambahProduk(prevState, formData) {
     }
   } catch (err) {
     pesanError = err.message || "Terjadi kesalahan pada server saat menyimpan produk.";
+  }
+
+  if (pesanError) {
+    return { error: pesanError, values };
+  }
+
+  revalidatePath("/admin");
+  revalidatePath("/");
+  redirect("/admin");
+}
+
+// US-09: id di-bind dari halaman ubah, jadi argumen pertama adalah id produk
+export async function ubahProduk(id, prevState, formData) {
+  const data = formData instanceof FormData ? formData : prevState instanceof FormData ? prevState : null;
+
+  if (!data) {
+    return { error: "Data form tidak valid." };
+  }
+
+  if (!/^\d+$/.test(String(id))) {
+    return { error: "ID produk tidak valid." };
+  }
+
+  const { values, errors, harga } = validasiProduk(data);
+
+  if (Object.keys(errors).length > 0) {
+    return { errors, values };
+  }
+
+  let pesanError = null;
+
+  try {
+    if (!(await pastikanAdminLogin())) {
+      pesanError = PESAN_SESI;
+    } else {
+      const { data: baris, error } = await klienAdmin()
+        .from("produk")
+        .update(barisProduk(values, harga))
+        .eq("id", Number(id))
+        .select("id");
+
+      if (error) {
+        pesanError = `Gagal menyimpan perubahan: ${error.message}`;
+      } else if (!baris || baris.length === 0) {
+        pesanError = "Produk tidak ditemukan. Mungkin sudah dihapus.";
+      }
+    }
+  } catch (err) {
+    pesanError = err.message || "Terjadi kesalahan pada server saat menyimpan perubahan.";
   }
 
   if (pesanError) {
